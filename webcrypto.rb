@@ -20,10 +20,6 @@ module WebCrypto
         v[:length].to_i.times.map { |i| v[i].to_i }
       end
 
-      def self.to_hex_array(js_array)
-        to_a(js_array).map { |b| b.to_s(16).rjust(2, '0') }
-      end
-
       def self.to_bytes(js_array)
         to_a(js_array).pack('C*')
       end
@@ -40,6 +36,31 @@ module WebCrypto
         bytes.each_byte.with_index { |b, i| arr[i] = b }
         arr
       end
+    end
+  end
+
+  # Hex and base64 helpers for moving byte Strings to/from text forms.
+  #
+  # Both directions use pack/unpack rather than the base64 gem (a bundled gem
+  # since Ruby 3.4, not guaranteed present in the ruby.wasm build). "m0" is
+  # strict base64 with no line wrapping, byte-identical to
+  # Base64.strict_encode64 / strict_decode64 — the unwrapped form every modern
+  # API and storage format expects.
+  module Encoding
+    def self.to_hex(bytes)
+      bytes.unpack1("H*")
+    end
+
+    def self.from_hex(hex)
+      [hex].pack("H*")
+    end
+
+    def self.to_base64(bytes)
+      [bytes].pack("m0")
+    end
+
+    def self.from_base64(str)
+      str.unpack1("m0")
     end
   end
 
