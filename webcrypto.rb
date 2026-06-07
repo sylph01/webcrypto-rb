@@ -523,6 +523,30 @@ module WebCrypto
       end
     end
 
+    module X25519
+      # X25519 Diffie-Hellman key agreement over Curve25519. Same shape as ECDH
+      # (peer public Key, no salt/hash); only the algorithm name differs.
+      module DeriveBits
+        def derive_bits(public_key, length:)
+          require_usage!("deriveBits")
+          algorithm = WebCrypto::Util.js_obj(name: "X25519", public: public_key.js)
+          result = JS.global[:crypto][:subtle].deriveBits(algorithm, @js, length).await
+          WebCrypto::Util::JSArray.to_bytes(result)
+        end
+      end
+
+      module DeriveKey
+        def derive_key(public_key, derived_key_algorithm:, usages:, extractable: true)
+          require_usage!("deriveKey")
+          algorithm = WebCrypto::Util.js_obj(name: "X25519", public: public_key.js)
+          result = JS.global[:crypto][:subtle]
+                     .deriveKey(algorithm, @js, WebCrypto::Util.js_obj(derived_key_algorithm), extractable, usages)
+                     .await
+          WebCrypto::Key.new(result)
+        end
+      end
+    end
+
     CAPABILITY_MAP = {
       "AES-GCM" => { "encrypt" => AESGCM::Encrypt, "decrypt" => AESGCM::Decrypt },
       "AES-CTR" => { "encrypt" => AESCTR::Encrypt, "decrypt" => AESCTR::Decrypt },
@@ -536,7 +560,8 @@ module WebCrypto
       "HMAC" => { "sign" => HMAC::Sign, "verify" => HMAC::Verify },
       "PBKDF2" => { "deriveBits" => PBKDF2::DeriveBits, "deriveKey" => PBKDF2::DeriveKey },
       "HKDF" => { "deriveBits" => HKDF::DeriveBits, "deriveKey" => HKDF::DeriveKey },
-      "ECDH" => { "deriveBits" => ECDH::DeriveBits, "deriveKey" => ECDH::DeriveKey }
+      "ECDH" => { "deriveBits" => ECDH::DeriveBits, "deriveKey" => ECDH::DeriveKey },
+      "X25519" => { "deriveBits" => X25519::DeriveBits, "deriveKey" => X25519::DeriveKey }
       # extend as needed
     }.freeze
   end
