@@ -439,6 +439,25 @@ module WebCrypto
     end
   end
 
+  # Supported message digests. SHA-1 is intentionally omitted: WebCrypto
+  # supports it, but it is not collision-resistant, so the library does not
+  # surface it in the default API.
+  DIGEST_ALGORITHMS = ["SHA-256", "SHA-384", "SHA-512"].freeze
+
+  # Hash bytes with crypto.subtle.digest. Keyless, so it lives on the top-level
+  # module rather than on Key. Takes Ruby bytes and returns Ruby bytes.
+  def self.digest(data, algorithm: "SHA-256")
+    unless DIGEST_ALGORITHMS.include?(algorithm)
+      raise ArgumentError,
+            "unsupported digest algorithm: #{algorithm.inspect} " \
+            "(expected one of #{DIGEST_ALGORITHMS.join(', ')})"
+    end
+
+    bytes = WebCrypto::Util::JSArray.from_bytes(data)
+    result = JS.global[:crypto][:subtle].digest(algorithm, bytes).await
+    WebCrypto::Util::JSArray.to_bytes(result)
+  end
+
   def self.getRandomValues(length)
     buf = JS.global[:Uint8Array].new(length)
     JS.global[:crypto].getRandomValues(buf)
