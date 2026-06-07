@@ -503,6 +503,23 @@ module WebCrypto
     end
   end
 
+  # Import keying material as a Key. Needed for algorithms that cannot be
+  # generated (PBKDF2/HKDF base keys come from raw password/secret bytes), and
+  # generally for loading externally-produced keys. key_data is Ruby bytes for
+  # the byte formats ("raw"/"spki"/"pkcs8"); "jwk" import is deferred to the JWK
+  # work, which needs a deep Ruby->JS converter.
+  def self.import_key(format, key_data, algorithm, extractable, usages)
+    if format == "jwk"
+      raise ArgumentError, "JWK import is not supported yet; use a byte format (raw/spki/pkcs8)"
+    end
+
+    data = WebCrypto::Util::JSArray.from_bytes(key_data)
+    result = JS.global[:crypto][:subtle]
+               .importKey(format, data, WebCrypto::Util.js_obj(algorithm), extractable, usages)
+               .await
+    Key.new(result)
+  end
+
   # Supported message digests. SHA-1 is intentionally omitted: WebCrypto
   # supports it, but it is not collision-resistant, so the library does not
   # surface it in the default API.
