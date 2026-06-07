@@ -462,6 +462,41 @@ module WebCrypto
       end
     end
 
+    module HKDF
+      # HMAC-based extract-and-expand key derivation. The base key is imported
+      # from secret bytes; the per-call params are salt, info, and hash. Unlike
+      # PBKDF2 there is no iteration count (HKDF is not a password stretcher).
+      def self.algorithm(salt:, info:, hash:)
+        WebCrypto::Util.js_obj(
+          name: "HKDF",
+          salt: WebCrypto::Util::JSArray.from_bytes(salt),
+          info: WebCrypto::Util::JSArray.from_bytes(info),
+          hash: hash
+        )
+      end
+
+      module DeriveBits
+        def derive_bits(length:, salt:, info:, hash: "SHA-256")
+          require_usage!("deriveBits")
+          result = JS.global[:crypto][:subtle]
+                     .deriveBits(HKDF.algorithm(salt: salt, info: info, hash: hash), @js, length)
+                     .await
+          WebCrypto::Util::JSArray.to_bytes(result)
+        end
+      end
+
+      module DeriveKey
+        def derive_key(derived_key_algorithm:, usages:, salt:, info:, hash: "SHA-256", extractable: true)
+          require_usage!("deriveKey")
+          result = JS.global[:crypto][:subtle]
+                     .deriveKey(HKDF.algorithm(salt: salt, info: info, hash: hash), @js,
+                                WebCrypto::Util.js_obj(derived_key_algorithm), extractable, usages)
+                     .await
+          WebCrypto::Key.new(result)
+        end
+      end
+    end
+
     CAPABILITY_MAP = {
       "AES-GCM" => { "encrypt" => AESGCM::Encrypt, "decrypt" => AESGCM::Decrypt },
       "AES-CTR" => { "encrypt" => AESCTR::Encrypt, "decrypt" => AESCTR::Decrypt },
@@ -473,7 +508,8 @@ module WebCrypto
       "RSA-PSS" => { "sign" => RSAPSS::Sign, "verify" => RSAPSS::Verify },
       "RSA-OAEP" => { "encrypt" => RSAOAEP::Encrypt, "decrypt" => RSAOAEP::Decrypt },
       "HMAC" => { "sign" => HMAC::Sign, "verify" => HMAC::Verify },
-      "PBKDF2" => { "deriveBits" => PBKDF2::DeriveBits, "deriveKey" => PBKDF2::DeriveKey }
+      "PBKDF2" => { "deriveBits" => PBKDF2::DeriveBits, "deriveKey" => PBKDF2::DeriveKey },
+      "HKDF" => { "deriveBits" => HKDF::DeriveBits, "deriveKey" => HKDF::DeriveKey }
       # extend as needed
     }.freeze
   end

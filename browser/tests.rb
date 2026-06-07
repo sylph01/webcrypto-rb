@@ -143,6 +143,15 @@ Tests.test("PBKDF2 derive_key produces a usable AES-GCM key") do
   Tests.assert_equal("derived".b, key.decrypt(ct, iv: iv))
 end
 
+# --- HKDF ---------------------------------------------------------------------
+Tests.test("HKDF derive_bits returns the requested length and is deterministic") do
+  base = WebCrypto.import_key("raw", ("k" * 16).b, { name: "HKDF" }, false, ["deriveBits"])
+  bits1 = base.derive_bits(length: 256, salt: "salt".b, info: "app-info".b, hash: "SHA-256")
+  bits2 = base.derive_bits(length: 256, salt: "salt".b, info: "app-info".b, hash: "SHA-256")
+  Tests.assert_equal(32, bits1.bytesize)
+  Tests.assert_equal(bits1, bits2)
+end
+
 # --- Ed25519 (may be unsupported on older browsers) ---------------------------
 Tests.test("Ed25519 sign/verify round-trips") do
   pair = WebCrypto.generate_key({ name: "Ed25519" }, true, ["sign", "verify"])
