@@ -296,13 +296,41 @@ module WebCrypto
       end
     end
 
+    module RSASSA_PKCS1_v1_5
+      # RSASSA-PKCS1-v1_5 binds its hash to the key at generation
+      # (RsaHashedKeyGenParams), so sign/verify take no hash parameter and the
+      # algorithm bag is just the name, like Ed25519. This is JWS RS256/384/512.
+      module Sign
+        def sign(data)
+          require_usage!("sign")
+          bytes = WebCrypto::Util::JSArray.from_bytes(data)
+          result = JS.global[:crypto][:subtle]
+                     .sign(WebCrypto::Util.js_obj(name: "RSASSA-PKCS1-v1_5"), @js, bytes)
+                     .await
+          WebCrypto::Util::JSArray.to_bytes(result)
+        end
+      end
+
+      module Verify
+        def verify(signature, data)
+          require_usage!("verify")
+          sig_bytes = WebCrypto::Util::JSArray.from_bytes(signature)
+          data_bytes = WebCrypto::Util::JSArray.from_bytes(data)
+          JS.global[:crypto][:subtle]
+            .verify(WebCrypto::Util.js_obj(name: "RSASSA-PKCS1-v1_5"), @js, sig_bytes, data_bytes)
+            .await == JS::True
+        end
+      end
+    end
+
     CAPABILITY_MAP = {
       "AES-GCM" => { "encrypt" => AESGCM::Encrypt, "decrypt" => AESGCM::Decrypt },
       "AES-CTR" => { "encrypt" => AESCTR::Encrypt, "decrypt" => AESCTR::Decrypt },
       "AES-CBC" => { "encrypt" => AESCBC::Encrypt, "decrypt" => AESCBC::Decrypt },
       "AES-KW"  => { "wrapKey" => AESKW::WrapKey,  "unwrapKey" => AESKW::UnwrapKey },
       "ECDSA"   => { "sign"    => ECDSA::Sign,     "verify"  => ECDSA::Verify   },
-      "Ed25519" => { "sign"    => Ed25519::Sign,   "verify"  => Ed25519::Verify }
+      "Ed25519" => { "sign"    => Ed25519::Sign,   "verify"  => Ed25519::Verify },
+      "RSASSA-PKCS1-v1_5" => { "sign" => RSASSA_PKCS1_v1_5::Sign, "verify" => RSASSA_PKCS1_v1_5::Verify }
       # extend as needed
     }.freeze
   end
