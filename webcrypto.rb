@@ -314,6 +314,9 @@ module WebCrypto
   class Key
     def initialize(js)
       @js = js
+      # A CryptoKey's usages are immutable, so snapshot them once. Frozen so a
+      # caller can't mutate the array and skew later require_usage! checks.
+      @usages = read_usages.freeze
       install_capabilities
     end
 
@@ -321,10 +324,7 @@ module WebCrypto
       @js[:algorithm][:name].to_s
     end
 
-    def usages
-      u = @js[:usages]
-      u[:length].to_i.times.map { |i| u[i].to_s }
-    end
+    attr_reader :usages
 
     protected
 
@@ -333,6 +333,11 @@ module WebCrypto
     attr_reader :js
 
     private
+
+    def read_usages
+      u = @js[:usages]
+      u[:length].to_i.times.map { |i| u[i].to_s }
+    end
 
     def install_capabilities
       sclass = (class << self; self; end)
