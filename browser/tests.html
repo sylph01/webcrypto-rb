@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>webcrypto-rb tests</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1.5rem; max-width: 60rem; }
+    #summary { font-size: 1.1rem; font-weight: 600; padding: .5rem 0; }
+    #summary.pass { color: #0a7a28; }
+    #summary.fail { color: #b00020; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: .35rem .6rem; border-bottom: 1px solid #e3e3e3; vertical-align: top; }
+    td.ok { color: #0a7a28; } td.no { color: #b00020; }
+    code { font-family: ui-monospace, monospace; }
+    .msg { color: #b00020; font-family: ui-monospace, monospace; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>webcrypto-rb tests</h1>
+  <!-- #status holds RUNNING / PASS / FAIL so a headless driver can assert on it. -->
+  <p id="status">RUNNING</p>
+  <p id="summary">Booting ruby.wasm…</p>
+  <table>
+    <thead><tr><th>#</th><th>Test</th><th>Result</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <script type="module">
+    import { DefaultRubyVM } from "https://cdn.jsdelivr.net/npm/@ruby/wasm-wasi@2.7.1/dist/browser/+esm";
+
+    const statusEl = document.getElementById("status");
+    const summaryEl = document.getElementById("summary");
+    const rowsEl = document.getElementById("rows");
+
+    function finish(status, summaryText, cssClass) {
+      statusEl.textContent = status;
+      summaryEl.textContent = summaryText;
+      if (cssClass) summaryEl.className = cssClass;
+    }
+
+    async function main() {
+      const response = await fetch("https://cdn.jsdelivr.net/npm/@ruby/3.4-wasm-wasi@2.7.1/dist/ruby+stdlib.wasm");
+      const module = await WebAssembly.compileStreaming(response);
+      const { vm } = await DefaultRubyVM(module);
+      vm.eval(`require "js"; require "js/promise"`);
+      vm.eval(await (await fetch("../webcrypto.rb")).text());
+
+      const testsSrc = await (await fetch("tests.rb")).text();
+      const json = (await vm.evalAsync(testsSrc)).toString();
+      const results = JSON.parse(json);
+      window.__testResults = results; // for headless drivers
+
+      let passed = 0;
+      results.forEach((r, i) => {
+        if (r.ok) passed++;
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          `<td>${i + 1}</td>` +
+          `<td><code>${r.name}</code></td>` +
+          (r.ok ? `<td class="ok">PASS</td>`
+                : `<td class="no">FAIL<div class="msg">${r.message}</div></td>`);
+        rowsEl.appendChild(tr);
+      });
+
+      const allOk = passed === results.length;
+      finish(allOk ? "PASS" : "FAIL",
+             `${passed}/${results.length} passed`,
+             allOk ? "pass" : "fail");
+    }
+
+    main().catch((e) => finish("ERROR", "Harness error: " + e, "fail"));
+  </script>
+</body>
+</html>
