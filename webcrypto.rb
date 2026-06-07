@@ -364,6 +364,40 @@ module WebCrypto
       end
     end
 
+    module RSAOAEP
+      # RSA-OAEP is RSA encryption (encrypt/decrypt). Its hash is bound to the
+      # key at generation (RsaHashedKeyGenParams); the only per-call parameter is
+      # an optional label (associated data), which encrypt and decrypt must agree
+      # on. Omitted by default.
+      def self.algorithm(label)
+        bag = { name: "RSA-OAEP" }
+        bag[:label] = WebCrypto::Util::JSArray.from_bytes(label) unless label.nil?
+        WebCrypto::Util.js_obj(bag)
+      end
+
+      module Encrypt
+        def encrypt(plaintext, label: nil)
+          require_usage!("encrypt")
+          data = WebCrypto::Util::JSArray.from_bytes(plaintext)
+          result = JS.global[:crypto][:subtle]
+                     .encrypt(RSAOAEP.algorithm(label), @js, data)
+                     .await
+          WebCrypto::Util::JSArray.to_bytes(result)
+        end
+      end
+
+      module Decrypt
+        def decrypt(ciphertext, label: nil)
+          require_usage!("decrypt")
+          data = WebCrypto::Util::JSArray.from_bytes(ciphertext)
+          result = JS.global[:crypto][:subtle]
+                     .decrypt(RSAOAEP.algorithm(label), @js, data)
+                     .await
+          WebCrypto::Util::JSArray.to_bytes(result)
+        end
+      end
+    end
+
     module HMAC
       # HMAC is a symmetric MAC: one key carries both sign and verify, and its
       # hash is bound at generation (HmacKeyGenParams), so the per-call bag is
@@ -401,6 +435,7 @@ module WebCrypto
       "Ed25519" => { "sign"    => Ed25519::Sign,   "verify"  => Ed25519::Verify },
       "RSASSA-PKCS1-v1_5" => { "sign" => RSASSA_PKCS1_v1_5::Sign, "verify" => RSASSA_PKCS1_v1_5::Verify },
       "RSA-PSS" => { "sign" => RSAPSS::Sign, "verify" => RSAPSS::Verify },
+      "RSA-OAEP" => { "encrypt" => RSAOAEP::Encrypt, "decrypt" => RSAOAEP::Decrypt },
       "HMAC" => { "sign" => HMAC::Sign, "verify" => HMAC::Verify }
       # extend as needed
     }.freeze

@@ -105,6 +105,22 @@ Tests.test("HMAC SHA-256 sign/verify round-trips and detects tampering") do
   Tests.assert(!key.verify(mac, "tampered".b), "tampered message should not verify")
 end
 
+# --- RSA-OAEP -----------------------------------------------------------------
+Tests.test("RSA-OAEP encrypt/decrypt round-trips (with and without label)") do
+  pubexp = WebCrypto::Util::JSArray.from_bytes("\x01\x00\x01".b)
+  pair = WebCrypto.generate_key(
+    { name: "RSA-OAEP", modulusLength: 2048, publicExponent: pubexp, hash: "SHA-256" },
+    true, ["encrypt", "decrypt"]
+  )
+  msg = "secret".b
+  ct = pair.public_key.encrypt(msg)
+  Tests.assert_equal(msg, pair.private_key.decrypt(ct))
+
+  label = "context".b
+  ct2 = pair.public_key.encrypt(msg, label: label)
+  Tests.assert_equal(msg, pair.private_key.decrypt(ct2, label: label))
+end
+
 # --- Ed25519 (may be unsupported on older browsers) ---------------------------
 Tests.test("Ed25519 sign/verify round-trips") do
   pair = WebCrypto.generate_key({ name: "Ed25519" }, true, ["sign", "verify"])
