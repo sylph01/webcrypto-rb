@@ -1,6 +1,15 @@
 require 'js'
 
 module WebCrypto
+  # Base class for every error this library raises, so callers can
+  # `rescue WebCrypto::Error` broadly.
+  class Error < StandardError; end
+
+  # Raised when an operation is attempted that the key's usages do not permit.
+  # Mirrors the InvalidAccessError WebCrypto itself would raise, but caught at
+  # the Ruby boundary with a clearer message and before any JS call.
+  class CapabilityError < Error; end
+
   module Util
     def self.js_obj(hash)
       obj = JS.global[:Object].new
@@ -64,9 +73,11 @@ module WebCrypto
     end
   end
 
-  # Per-algorithm capability modules. Each is mixed into a Key's singleton class
-  # based on the key's usages. Their methods operate on the wrapped JS CryptoKey
-  # through the Key's private @js handle, so callers only ever see the Key.
+  # Per-algorithm capability modules. All of an algorithm's modules are mixed
+  # into a Key's singleton class, so the methods always exist for keys of that
+  # algorithm; each method calls require_usage! first and raises CapabilityError
+  # if the key's usages do not include the operation. Methods operate on the
+  # wrapped JS CryptoKey through the Key's private @js handle.
   module Capabilities
     module AESGCM
       # NIST SP 800-38D recommended IV length. Exactly 12 bytes triggers GCM's
@@ -83,6 +94,7 @@ module WebCrypto
 
       module Encrypt
         def encrypt(plaintext, iv:)
+          require_usage!("encrypt")
           AESGCM.validate_iv!(iv)
           data = WebCrypto::Util::JSArray.from_bytes(plaintext)
           iv_arr = WebCrypto::Util::JSArray.from_bytes(iv)
@@ -95,6 +107,7 @@ module WebCrypto
 
       module Decrypt
         def decrypt(ciphertext, iv:)
+          require_usage!("decrypt")
           AESGCM.validate_iv!(iv)
           data = WebCrypto::Util::JSArray.from_bytes(ciphertext)
           iv_arr = WebCrypto::Util::JSArray.from_bytes(iv)
@@ -122,6 +135,7 @@ module WebCrypto
 
       module Encrypt
         def encrypt(plaintext, counter:, length: DEFAULT_LENGTH)
+          require_usage!("encrypt")
           AESCTR.validate_counter!(counter)
           data = WebCrypto::Util::JSArray.from_bytes(plaintext)
           counter_arr = WebCrypto::Util::JSArray.from_bytes(counter)
@@ -134,6 +148,7 @@ module WebCrypto
 
       module Decrypt
         def decrypt(ciphertext, counter:, length: DEFAULT_LENGTH)
+          require_usage!("decrypt")
           AESCTR.validate_counter!(counter)
           data = WebCrypto::Util::JSArray.from_bytes(ciphertext)
           counter_arr = WebCrypto::Util::JSArray.from_bytes(counter)
@@ -158,6 +173,7 @@ module WebCrypto
 
       module Encrypt
         def encrypt(plaintext, iv:)
+          require_usage!("encrypt")
           AESCBC.validate_iv!(iv)
           data = WebCrypto::Util::JSArray.from_bytes(plaintext)
           iv_arr = WebCrypto::Util::JSArray.from_bytes(iv)
@@ -170,6 +186,7 @@ module WebCrypto
 
       module Decrypt
         def decrypt(ciphertext, iv:)
+          require_usage!("decrypt")
           AESCBC.validate_iv!(iv)
           data = WebCrypto::Util::JSArray.from_bytes(ciphertext)
           iv_arr = WebCrypto::Util::JSArray.from_bytes(iv)
@@ -188,6 +205,7 @@ module WebCrypto
       # takes wrapped bytes and returns a fresh Key.
       module WrapKey
         def wrap_key(key, format: "raw")
+          require_usage!("wrapKey")
           result = JS.global[:crypto][:subtle]
                      .wrapKey(format, key.js, @js, WebCrypto::Util.js_obj(name: "AES-KW"))
                      .await
@@ -197,6 +215,7 @@ module WebCrypto
 
       module UnwrapKey
         def unwrap_key(wrapped_key, algorithm:, usages:, extractable: true, format: "raw")
+          require_usage!("unwrapKey")
           data = WebCrypto::Util::JSArray.from_bytes(wrapped_key)
           result = JS.global[:crypto][:subtle]
                      .unwrapKey(format, data, @js, WebCrypto::Util.js_obj(name: "AES-KW"),
@@ -230,6 +249,7 @@ module WebCrypto
 
       module Sign
         def sign(data, hash: nil)
+          require_usage!("sign")
           hash ||= ECDSA.default_hash(@js)
           bytes = WebCrypto::Util::JSArray.from_bytes(data)
           result = JS.global[:crypto][:subtle]
@@ -241,6 +261,7 @@ module WebCrypto
 
       module Verify
         def verify(signature, data, hash: nil)
+          require_usage!("verify")
           hash ||= ECDSA.default_hash(@js)
           sig_bytes = WebCrypto::Util::JSArray.from_bytes(signature)
           data_bytes = WebCrypto::Util::JSArray.from_bytes(data)
@@ -254,6 +275,7 @@ module WebCrypto
     module Ed25519
       module Sign
         def sign(data)
+          require_usage!("sign")
           bytes = WebCrypto::Util::JSArray.from_bytes(data)
           result = JS.global[:crypto][:subtle]
                      .sign(WebCrypto::Util.js_obj(name: "Ed25519"), @js, bytes)
@@ -264,6 +286,7 @@ module WebCrypto
 
       module Verify
         def verify(signature, data)
+          require_usage!("verify")
           sig_bytes = WebCrypto::Util::JSArray.from_bytes(signature)
           data_bytes = WebCrypto::Util::JSArray.from_bytes(data)
           JS.global[:crypto][:subtle]
@@ -286,7 +309,8 @@ module WebCrypto
 
   # A WebCrypto CryptoKey with a Ruby-native surface. The JS handle is held in a
   # private @js and never exposed to callers; capability methods (encrypt, sign,
-  # ...) are mixed into the instance's singleton class based on the key's usages.
+  # ...) are mixed into the instance's singleton class for the key's algorithm,
+  # and each checks the key's usages at call time (see require_usage!).
   class Key
     def initialize(js)
       @js = js
@@ -313,7 +337,16 @@ module WebCrypto
     def install_capabilities
       sclass = (class << self; self; end)
       mods = Capabilities::CAPABILITY_MAP[algorithm_name] || {}
-      usages.each { |u| sclass.include(mods[u]) if mods[u] }
+      mods.each_value { |mod| sclass.include(mod) }
+    end
+
+    # Capability enforcement at the Ruby boundary, mirroring WebCrypto's own
+    # usage checks. Raises before any JS call so misuse surfaces early.
+    def require_usage!(usage)
+      return if usages.include?(usage)
+
+      raise CapabilityError,
+            "key does not permit #{usage} (usages: #{usages.join(', ')})"
     end
   end
 
