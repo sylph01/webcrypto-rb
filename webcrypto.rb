@@ -497,6 +497,32 @@ module WebCrypto
       end
     end
 
+    module ECDH
+      # Elliptic-curve Diffie-Hellman key agreement. The base key is the local
+      # ECDH private key; the only param is the peer's public Key, whose JS
+      # handle is read via the protected #js. derive_bits returns the raw shared
+      # secret; derive_key turns it into a fresh Key.
+      module DeriveBits
+        def derive_bits(public_key, length:)
+          require_usage!("deriveBits")
+          algorithm = WebCrypto::Util.js_obj(name: "ECDH", public: public_key.js)
+          result = JS.global[:crypto][:subtle].deriveBits(algorithm, @js, length).await
+          WebCrypto::Util::JSArray.to_bytes(result)
+        end
+      end
+
+      module DeriveKey
+        def derive_key(public_key, derived_key_algorithm:, usages:, extractable: true)
+          require_usage!("deriveKey")
+          algorithm = WebCrypto::Util.js_obj(name: "ECDH", public: public_key.js)
+          result = JS.global[:crypto][:subtle]
+                     .deriveKey(algorithm, @js, WebCrypto::Util.js_obj(derived_key_algorithm), extractable, usages)
+                     .await
+          WebCrypto::Key.new(result)
+        end
+      end
+    end
+
     CAPABILITY_MAP = {
       "AES-GCM" => { "encrypt" => AESGCM::Encrypt, "decrypt" => AESGCM::Decrypt },
       "AES-CTR" => { "encrypt" => AESCTR::Encrypt, "decrypt" => AESCTR::Decrypt },
@@ -509,7 +535,8 @@ module WebCrypto
       "RSA-OAEP" => { "encrypt" => RSAOAEP::Encrypt, "decrypt" => RSAOAEP::Decrypt },
       "HMAC" => { "sign" => HMAC::Sign, "verify" => HMAC::Verify },
       "PBKDF2" => { "deriveBits" => PBKDF2::DeriveBits, "deriveKey" => PBKDF2::DeriveKey },
-      "HKDF" => { "deriveBits" => HKDF::DeriveBits, "deriveKey" => HKDF::DeriveKey }
+      "HKDF" => { "deriveBits" => HKDF::DeriveBits, "deriveKey" => HKDF::DeriveKey },
+      "ECDH" => { "deriveBits" => ECDH::DeriveBits, "deriveKey" => ECDH::DeriveKey }
       # extend as needed
     }.freeze
   end

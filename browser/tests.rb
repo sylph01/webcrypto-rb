@@ -152,6 +152,16 @@ Tests.test("HKDF derive_bits returns the requested length and is deterministic")
   Tests.assert_equal(bits1, bits2)
 end
 
+# --- ECDH ---------------------------------------------------------------------
+Tests.test("ECDH P-256 derive_bits agrees between two parties") do
+  alice = WebCrypto.generate_key({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"])
+  bob   = WebCrypto.generate_key({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"])
+  a = alice.private_key.derive_bits(bob.public_key, length: 256)
+  b = bob.private_key.derive_bits(alice.public_key, length: 256)
+  Tests.assert_equal(32, a.bytesize)
+  Tests.assert_equal(a, b)
+end
+
 # --- Ed25519 (may be unsupported on older browsers) ---------------------------
 Tests.test("Ed25519 sign/verify round-trips") do
   pair = WebCrypto.generate_key({ name: "Ed25519" }, true, ["sign", "verify"])
