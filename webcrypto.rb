@@ -364,6 +364,34 @@ module WebCrypto
       end
     end
 
+    module HMAC
+      # HMAC is a symmetric MAC: one key carries both sign and verify, and its
+      # hash is bound at generation (HmacKeyGenParams), so the per-call bag is
+      # just the name, like Ed25519. verify delegates to subtle.verify, which
+      # compares the MAC in constant time — never compare MACs in Ruby.
+      module Sign
+        def sign(data)
+          require_usage!("sign")
+          bytes = WebCrypto::Util::JSArray.from_bytes(data)
+          result = JS.global[:crypto][:subtle]
+                     .sign(WebCrypto::Util.js_obj(name: "HMAC"), @js, bytes)
+                     .await
+          WebCrypto::Util::JSArray.to_bytes(result)
+        end
+      end
+
+      module Verify
+        def verify(signature, data)
+          require_usage!("verify")
+          sig_bytes = WebCrypto::Util::JSArray.from_bytes(signature)
+          data_bytes = WebCrypto::Util::JSArray.from_bytes(data)
+          JS.global[:crypto][:subtle]
+            .verify(WebCrypto::Util.js_obj(name: "HMAC"), @js, sig_bytes, data_bytes)
+            .await == JS::True
+        end
+      end
+    end
+
     CAPABILITY_MAP = {
       "AES-GCM" => { "encrypt" => AESGCM::Encrypt, "decrypt" => AESGCM::Decrypt },
       "AES-CTR" => { "encrypt" => AESCTR::Encrypt, "decrypt" => AESCTR::Decrypt },
@@ -372,7 +400,8 @@ module WebCrypto
       "ECDSA"   => { "sign"    => ECDSA::Sign,     "verify"  => ECDSA::Verify   },
       "Ed25519" => { "sign"    => Ed25519::Sign,   "verify"  => Ed25519::Verify },
       "RSASSA-PKCS1-v1_5" => { "sign" => RSASSA_PKCS1_v1_5::Sign, "verify" => RSASSA_PKCS1_v1_5::Verify },
-      "RSA-PSS" => { "sign" => RSAPSS::Sign, "verify" => RSAPSS::Verify }
+      "RSA-PSS" => { "sign" => RSAPSS::Sign, "verify" => RSAPSS::Verify },
+      "HMAC" => { "sign" => HMAC::Sign, "verify" => HMAC::Verify }
       # extend as needed
     }.freeze
   end

@@ -96,6 +96,15 @@ Tests.test("ECDSA P-256 sign/verify round-trips and detects tampering") do
   Tests.assert(!pair.public_key.verify(sig, "tampered".b), "tampered message should not verify")
 end
 
+# --- HMAC ---------------------------------------------------------------------
+Tests.test("HMAC SHA-256 sign/verify round-trips and detects tampering") do
+  key = WebCrypto.generate_key({ name: "HMAC", hash: "SHA-256" }, true, ["sign", "verify"])
+  msg = "mac me".b
+  mac = key.sign(msg)
+  Tests.assert(key.verify(mac, msg), "valid MAC should verify")
+  Tests.assert(!key.verify(mac, "tampered".b), "tampered message should not verify")
+end
+
 # --- Ed25519 (may be unsupported on older browsers) ---------------------------
 Tests.test("Ed25519 sign/verify round-trips") do
   pair = WebCrypto.generate_key({ name: "Ed25519" }, true, ["sign", "verify"])
