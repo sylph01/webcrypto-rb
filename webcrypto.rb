@@ -51,6 +51,26 @@ module WebCrypto
       end
     end
 
+    # Recursively convert a Ruby value to a JS value — the mirror of
+    # deep_to_ruby, for importKey("jwk", ...). Generalizes js_obj to recurse
+    # through nested Hashes and Arrays. Primitives (String/Integer/Float/
+    # true/false/nil) are returned as-is; they convert when assigned into a JS
+    # container or passed as an argument.
+    def self.deep_to_js(value)
+      case value
+      when Hash
+        obj = JS.global[:Object].new
+        value.each { |k, v| obj[k] = deep_to_js(v) }
+        obj
+      when Array
+        arr = JS.global[:Array].new
+        value.each { |v| arr.push(deep_to_js(v)) }
+        arr
+      else
+        value
+      end
+    end
+
     module JSArray
       # Accept either a TypedArray or an ArrayBuffer
       def self.view(js_obj)
@@ -619,6 +639,19 @@ module WebCrypto
 
     attr_reader :usages
 
+    # Export the key. "jwk" returns a Ruby Hash (deeply converted); the byte
+    # formats "raw"/"spki"/"pkcs8" return a Ruby byte String. Requires the key
+    # to be extractable, mirroring WebCrypto's InvalidAccessError with a clear
+    # Ruby error raised before the JS call.
+    def export_key(format)
+      unless @js[:extractable] == JS::True
+        raise CapabilityError, "key is not extractable; cannot export"
+      end
+
+      result = JS.global[:crypto][:subtle].exportKey(format, @js).await
+      format == "jwk" ? WebCrypto::Util.deep_to_ruby(result) : WebCrypto::Util::JSArray.to_bytes(result)
+    end
+
     protected
 
     # Exposed only to other Keys (AES-KW wrap_key needs the JS handle of the key
@@ -668,11 +701,9 @@ module WebCrypto
   # the byte formats ("raw"/"spki"/"pkcs8"); "jwk" import is deferred to the JWK
   # work, which needs a deep Ruby->JS converter.
   def self.import_key(format, key_data, algorithm, extractable, usages)
-    if format == "jwk"
-      raise ArgumentError, "JWK import is not supported yet; use a byte format (raw/spki/pkcs8)"
-    end
-
-    data = WebCrypto::Util::JSArray.from_bytes(key_data)
+    # JWK is a Ruby Hash (deeply converted to a JS object); byte formats
+    # (raw/spki/pkcs8) take Ruby bytes.
+    data = format == "jwk" ? WebCrypto::Util.deep_to_js(key_data) : WebCrypto::Util::JSArray.from_bytes(key_data)
     result = JS.global[:crypto][:subtle]
                .importKey(format, data, WebCrypto::Util.js_obj(algorithm), extractable, usages)
                .await

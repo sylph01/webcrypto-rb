@@ -62,6 +62,30 @@ Tests.test("Util.deep_to_ruby converts a nested JS object across all value types
   Tests.assert_equal(2, ruby["meta"]["n"])
 end
 
+Tests.test("Util.deep_to_js round-trips a Ruby structure through JS") do
+  original = { "kty" => "EC", "ext" => true, "key_ops" => ["sign", "verify"], "meta" => { "n" => 2 } }
+  back = WebCrypto::Util.deep_to_ruby(WebCrypto::Util.deep_to_js(original))
+  Tests.assert_equal(original, back)
+end
+
+# --- JWK export/import --------------------------------------------------------
+Tests.test("JWK export/import round-trips an EC public key that verifies a signature") do
+  pair = WebCrypto.generate_key({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"])
+  msg = "jwk".b
+  sig = pair.private_key.sign(msg)
+
+  pub_jwk = pair.public_key.export_key("jwk")
+  Tests.assert_equal("EC", pub_jwk["kty"])
+
+  reimported = WebCrypto.import_key("jwk", pub_jwk, { name: "ECDSA", namedCurve: "P-256" }, true, ["verify"])
+  Tests.assert(reimported.verify(sig, msg), "reimported public key should verify the original signature")
+end
+
+Tests.test("export_key raises CapabilityError for a non-extractable key") do
+  key = WebCrypto.generate_key({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"])
+  Tests.assert_raises(WebCrypto::CapabilityError) { key.export_key("jwk") }
+end
+
 # --- digest (known-answer, no randomness) -------------------------------------
 Tests.test("digest SHA-256 of 'abc' matches the known answer") do
   digest = WebCrypto.digest("abc".b, algorithm: "SHA-256")
