@@ -64,20 +64,10 @@ module WebCrypto
     end
   end
 
-  module CryptoKey
-    KeyPair = Struct.new(:public_key, :private_key)
-
-    module Base
-      def algorithm_name
-        self[:algorithm][:name].to_s
-      end
-
-      def usages
-        u = self[:usages]
-        u[:length].to_i.times.map { |i| u[i].to_s }
-      end
-    end
-
+  # Per-algorithm capability modules. Each is mixed into a Key's singleton class
+  # based on the key's usages. Their methods operate on the wrapped JS CryptoKey
+  # through the Key's private @js handle, so callers only ever see the Key.
+  module Capabilities
     module AESGCM
       # NIST SP 800-38D recommended IV length. Exactly 12 bytes triggers GCM's
       # fast path (counter seeded from IV || 0x00000001); other lengths run the
@@ -97,7 +87,7 @@ module WebCrypto
           data = WebCrypto::Util::JSArray.from_bytes(plaintext)
           iv_arr = WebCrypto::Util::JSArray.from_bytes(iv)
           result = JS.global[:crypto][:subtle]
-                     .encrypt(WebCrypto::Util.js_obj(name: "AES-GCM", iv: iv_arr), self, data)
+                     .encrypt(WebCrypto::Util.js_obj(name: "AES-GCM", iv: iv_arr), @js, data)
                      .await
           WebCrypto::Util::JSArray.to_bytes(result)
         end
@@ -109,7 +99,7 @@ module WebCrypto
           data = WebCrypto::Util::JSArray.from_bytes(ciphertext)
           iv_arr = WebCrypto::Util::JSArray.from_bytes(iv)
           result = JS.global[:crypto][:subtle]
-                     .decrypt(WebCrypto::Util.js_obj(name: "AES-GCM", iv: iv_arr), self, data)
+                     .decrypt(WebCrypto::Util.js_obj(name: "AES-GCM", iv: iv_arr), @js, data)
                      .await
           WebCrypto::Util::JSArray.to_bytes(result)
         end
@@ -136,7 +126,7 @@ module WebCrypto
           data = WebCrypto::Util::JSArray.from_bytes(plaintext)
           counter_arr = WebCrypto::Util::JSArray.from_bytes(counter)
           result = JS.global[:crypto][:subtle]
-                     .encrypt(WebCrypto::Util.js_obj(name: "AES-CTR", counter: counter_arr, length: length), self, data)
+                     .encrypt(WebCrypto::Util.js_obj(name: "AES-CTR", counter: counter_arr, length: length), @js, data)
                      .await
           WebCrypto::Util::JSArray.to_bytes(result)
         end
@@ -148,7 +138,7 @@ module WebCrypto
           data = WebCrypto::Util::JSArray.from_bytes(ciphertext)
           counter_arr = WebCrypto::Util::JSArray.from_bytes(counter)
           result = JS.global[:crypto][:subtle]
-                     .decrypt(WebCrypto::Util.js_obj(name: "AES-CTR", counter: counter_arr, length: length), self, data)
+                     .decrypt(WebCrypto::Util.js_obj(name: "AES-CTR", counter: counter_arr, length: length), @js, data)
                      .await
           WebCrypto::Util::JSArray.to_bytes(result)
         end
@@ -172,7 +162,7 @@ module WebCrypto
           data = WebCrypto::Util::JSArray.from_bytes(plaintext)
           iv_arr = WebCrypto::Util::JSArray.from_bytes(iv)
           result = JS.global[:crypto][:subtle]
-                     .encrypt(WebCrypto::Util.js_obj(name: "AES-CBC", iv: iv_arr), self, data)
+                     .encrypt(WebCrypto::Util.js_obj(name: "AES-CBC", iv: iv_arr), @js, data)
                      .await
           WebCrypto::Util::JSArray.to_bytes(result)
         end
@@ -184,7 +174,7 @@ module WebCrypto
           data = WebCrypto::Util::JSArray.from_bytes(ciphertext)
           iv_arr = WebCrypto::Util::JSArray.from_bytes(iv)
           result = JS.global[:crypto][:subtle]
-                     .decrypt(WebCrypto::Util.js_obj(name: "AES-CBC", iv: iv_arr), self, data)
+                     .decrypt(WebCrypto::Util.js_obj(name: "AES-CBC", iv: iv_arr), @js, data)
                      .await
           WebCrypto::Util::JSArray.to_bytes(result)
         end
@@ -195,11 +185,11 @@ module WebCrypto
       # AES-KW (RFC 3394 key wrap) does not use encrypt/decrypt: it wraps and
       # unwraps CryptoKeys. There is no IV; the algorithm bag is just the name.
       # wrap_key takes another Key and returns the wrapped bytes; unwrap_key
-      # takes wrapped bytes and returns a fresh, capability-wrapped Key.
+      # takes wrapped bytes and returns a fresh Key.
       module WrapKey
         def wrap_key(key, format: "raw")
           result = JS.global[:crypto][:subtle]
-                     .wrapKey(format, key, self, WebCrypto::Util.js_obj(name: "AES-KW"))
+                     .wrapKey(format, key.js, @js, WebCrypto::Util.js_obj(name: "AES-KW"))
                      .await
           WebCrypto::Util::JSArray.to_bytes(result)
         end
@@ -209,10 +199,10 @@ module WebCrypto
         def unwrap_key(wrapped_key, algorithm:, usages:, extractable: true, format: "raw")
           data = WebCrypto::Util::JSArray.from_bytes(wrapped_key)
           result = JS.global[:crypto][:subtle]
-                     .unwrapKey(format, data, self, WebCrypto::Util.js_obj(name: "AES-KW"),
+                     .unwrapKey(format, data, @js, WebCrypto::Util.js_obj(name: "AES-KW"),
                                 WebCrypto::Util.js_obj(algorithm), extractable, usages)
                      .await
-          WebCrypto::CryptoKey.wrap(result)
+          WebCrypto::Key.new(result)
         end
       end
     end
@@ -233,17 +223,17 @@ module WebCrypto
         "P-521" => "SHA-512"
       }.freeze
 
-      def self.default_hash(key)
-        curve = key[:algorithm][:namedCurve].to_s
+      def self.default_hash(js_key)
+        curve = js_key[:algorithm][:namedCurve].to_s
         CURVE_HASH[curve] || raise(ArgumentError, "unsupported ECDSA curve: #{curve.inspect}")
       end
 
       module Sign
         def sign(data, hash: nil)
-          hash ||= ECDSA.default_hash(self)
+          hash ||= ECDSA.default_hash(@js)
           bytes = WebCrypto::Util::JSArray.from_bytes(data)
           result = JS.global[:crypto][:subtle]
-                     .sign(WebCrypto::Util.js_obj(name: "ECDSA", hash: hash), self, bytes)
+                     .sign(WebCrypto::Util.js_obj(name: "ECDSA", hash: hash), @js, bytes)
                      .await
           WebCrypto::Util::JSArray.to_bytes(result)
         end
@@ -251,11 +241,11 @@ module WebCrypto
 
       module Verify
         def verify(signature, data, hash: nil)
-          hash ||= ECDSA.default_hash(self)
+          hash ||= ECDSA.default_hash(@js)
           sig_bytes = WebCrypto::Util::JSArray.from_bytes(signature)
           data_bytes = WebCrypto::Util::JSArray.from_bytes(data)
           JS.global[:crypto][:subtle]
-            .verify(WebCrypto::Util.js_obj(name: "ECDSA", hash: hash), self, sig_bytes, data_bytes)
+            .verify(WebCrypto::Util.js_obj(name: "ECDSA", hash: hash), @js, sig_bytes, data_bytes)
             .await == JS::True
         end
       end
@@ -266,7 +256,7 @@ module WebCrypto
         def sign(data)
           bytes = WebCrypto::Util::JSArray.from_bytes(data)
           result = JS.global[:crypto][:subtle]
-                     .sign(WebCrypto::Util.js_obj(name: "Ed25519"), self, bytes)
+                     .sign(WebCrypto::Util.js_obj(name: "Ed25519"), @js, bytes)
                      .await
           WebCrypto::Util::JSArray.to_bytes(result)
         end
@@ -277,7 +267,7 @@ module WebCrypto
           sig_bytes = WebCrypto::Util::JSArray.from_bytes(signature)
           data_bytes = WebCrypto::Util::JSArray.from_bytes(data)
           JS.global[:crypto][:subtle]
-            .verify(WebCrypto::Util.js_obj(name: "Ed25519"), self, sig_bytes, data_bytes)
+            .verify(WebCrypto::Util.js_obj(name: "Ed25519"), @js, sig_bytes, data_bytes)
             .await == JS::True
         end
       end
@@ -292,27 +282,52 @@ module WebCrypto
       "Ed25519" => { "sign"    => Ed25519::Sign,   "verify"  => Ed25519::Verify }
       # extend as needed
     }.freeze
+  end
 
-    def self.wrap(key)
-      sclass = (class << key; self; end)
-      sclass.include(Base)
-      mods = CAPABILITY_MAP[key.algorithm_name] || {}
-      key.usages.each do |u|
-        sclass.include(mods[u]) if mods[u]
-      end
-      key
+  # A WebCrypto CryptoKey with a Ruby-native surface. The JS handle is held in a
+  # private @js and never exposed to callers; capability methods (encrypt, sign,
+  # ...) are mixed into the instance's singleton class based on the key's usages.
+  class Key
+    def initialize(js)
+      @js = js
+      install_capabilities
     end
 
-    def self.generate_key(algorithm, is_extractable, key_usages)
-      result = JS.global[:crypto][:subtle]
-                 .generateKey(WebCrypto::Util.js_obj(algorithm), is_extractable, key_usages)
-                 .await
+    def algorithm_name
+      @js[:algorithm][:name].to_s
+    end
 
-      if result[:constructor][:name].to_s == "CryptoKey"
-        wrap(result)
-      else
-        KeyPair.new(wrap(result[:publicKey]), wrap(result[:privateKey]))
-      end
+    def usages
+      u = @js[:usages]
+      u[:length].to_i.times.map { |i| u[i].to_s }
+    end
+
+    protected
+
+    # Exposed only to other Keys (AES-KW wrap_key needs the JS handle of the key
+    # being wrapped). Protected keeps it off the public surface.
+    attr_reader :js
+
+    private
+
+    def install_capabilities
+      sclass = (class << self; self; end)
+      mods = Capabilities::CAPABILITY_MAP[algorithm_name] || {}
+      usages.each { |u| sclass.include(mods[u]) if mods[u] }
+    end
+  end
+
+  KeyPair = Struct.new(:public_key, :private_key)
+
+  def self.generate_key(algorithm, extractable, usages)
+    result = JS.global[:crypto][:subtle]
+               .generateKey(WebCrypto::Util.js_obj(algorithm), extractable, usages)
+               .await
+
+    if result[:constructor][:name].to_s == "CryptoKey"
+      Key.new(result)
+    else
+      KeyPair.new(Key.new(result[:publicKey]), Key.new(result[:privateKey]))
     end
   end
 
