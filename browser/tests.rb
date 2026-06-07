@@ -121,6 +121,28 @@ Tests.test("RSA-OAEP encrypt/decrypt round-trips (with and without label)") do
   Tests.assert_equal(msg, pair.private_key.decrypt(ct2, label: label))
 end
 
+# --- PBKDF2 -------------------------------------------------------------------
+Tests.test("PBKDF2 derive_bits returns the requested length and is deterministic") do
+  base = WebCrypto.import_key("raw", "password".b, { name: "PBKDF2" }, false, ["deriveBits"])
+  salt = "salt-salt".b
+  bits1 = base.derive_bits(length: 256, salt: salt, iterations: 1000, hash: "SHA-256")
+  bits2 = base.derive_bits(length: 256, salt: salt, iterations: 1000, hash: "SHA-256")
+  Tests.assert_equal(32, bits1.bytesize)
+  Tests.assert_equal(bits1, bits2)
+end
+
+Tests.test("PBKDF2 derive_key produces a usable AES-GCM key") do
+  base = WebCrypto.import_key("raw", "password".b, { name: "PBKDF2" }, false, ["deriveKey"])
+  key = base.derive_key(
+    derived_key_algorithm: { name: "AES-GCM", length: 256 },
+    usages: ["encrypt", "decrypt"],
+    salt: "salt-salt".b, iterations: 1000, hash: "SHA-256"
+  )
+  iv = Tests.random_iv
+  ct = key.encrypt("derived".b, iv: iv)
+  Tests.assert_equal("derived".b, key.decrypt(ct, iv: iv))
+end
+
 # --- Ed25519 (may be unsupported on older browsers) ---------------------------
 Tests.test("Ed25519 sign/verify round-trips") do
   pair = WebCrypto.generate_key({ name: "Ed25519" }, true, ["sign", "verify"])

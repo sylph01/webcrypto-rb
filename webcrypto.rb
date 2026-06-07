@@ -426,6 +426,42 @@ module WebCrypto
       end
     end
 
+    module PBKDF2
+      # Password-based key derivation. The base key is imported from password
+      # bytes (see WebCrypto.import_key); the per-call params are salt,
+      # iterations, and hash. derive_bits returns raw bytes; derive_key returns a
+      # fresh Key described by derived_key_algorithm.
+      def self.algorithm(salt:, iterations:, hash:)
+        WebCrypto::Util.js_obj(
+          name: "PBKDF2",
+          salt: WebCrypto::Util::JSArray.from_bytes(salt),
+          iterations: iterations,
+          hash: hash
+        )
+      end
+
+      module DeriveBits
+        def derive_bits(length:, salt:, iterations:, hash: "SHA-256")
+          require_usage!("deriveBits")
+          result = JS.global[:crypto][:subtle]
+                     .deriveBits(PBKDF2.algorithm(salt: salt, iterations: iterations, hash: hash), @js, length)
+                     .await
+          WebCrypto::Util::JSArray.to_bytes(result)
+        end
+      end
+
+      module DeriveKey
+        def derive_key(derived_key_algorithm:, usages:, salt:, iterations:, hash: "SHA-256", extractable: true)
+          require_usage!("deriveKey")
+          result = JS.global[:crypto][:subtle]
+                     .deriveKey(PBKDF2.algorithm(salt: salt, iterations: iterations, hash: hash), @js,
+                                WebCrypto::Util.js_obj(derived_key_algorithm), extractable, usages)
+                     .await
+          WebCrypto::Key.new(result)
+        end
+      end
+    end
+
     CAPABILITY_MAP = {
       "AES-GCM" => { "encrypt" => AESGCM::Encrypt, "decrypt" => AESGCM::Decrypt },
       "AES-CTR" => { "encrypt" => AESCTR::Encrypt, "decrypt" => AESCTR::Decrypt },
@@ -436,7 +472,8 @@ module WebCrypto
       "RSASSA-PKCS1-v1_5" => { "sign" => RSASSA_PKCS1_v1_5::Sign, "verify" => RSASSA_PKCS1_v1_5::Verify },
       "RSA-PSS" => { "sign" => RSAPSS::Sign, "verify" => RSAPSS::Verify },
       "RSA-OAEP" => { "encrypt" => RSAOAEP::Encrypt, "decrypt" => RSAOAEP::Decrypt },
-      "HMAC" => { "sign" => HMAC::Sign, "verify" => HMAC::Verify }
+      "HMAC" => { "sign" => HMAC::Sign, "verify" => HMAC::Verify },
+      "PBKDF2" => { "deriveBits" => PBKDF2::DeriveBits, "deriveKey" => PBKDF2::DeriveKey }
       # extend as needed
     }.freeze
   end
