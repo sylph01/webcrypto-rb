@@ -27,6 +27,19 @@ module WebCrypto
       def self.to_bytes(js_array)
         to_a(js_array).pack('C*')
       end
+
+      # Build a Uint8Array from a Ruby byte String via per-byte construction.
+      # Never goes through TextEncoder: every byte (including those above 0x7F)
+      # crosses unchanged, so key material / ciphertext / IVs are preserved.
+      def self.from_bytes(bytes)
+        unless bytes.is_a?(String)
+          raise TypeError, "expected a byte String, got #{bytes.class}"
+        end
+
+        arr = JS.global[:Uint8Array].new(bytes.bytesize)
+        bytes.each_byte.with_index { |b, i| arr[i] = b }
+        arr
+      end
     end
   end
 
@@ -47,18 +60,23 @@ module WebCrypto
     module AESGCM
       module Encrypt
         def encrypt(plaintext, iv:)
-          encoded = plaintext.is_a?(String) ? JS.global[:TextEncoder].new.encode(plaintext) : plaintext
-          JS.global[:crypto][:subtle]
-            .encrypt(WebCrypto::Util.js_obj(name: "AES-GCM", iv: iv), self, encoded)
-            .await
+          data = WebCrypto::Util::JSArray.from_bytes(plaintext)
+          iv_arr = WebCrypto::Util::JSArray.from_bytes(iv)
+          result = JS.global[:crypto][:subtle]
+                     .encrypt(WebCrypto::Util.js_obj(name: "AES-GCM", iv: iv_arr), self, data)
+                     .await
+          WebCrypto::Util::JSArray.to_bytes(result)
         end
       end
 
       module Decrypt
         def decrypt(ciphertext, iv:)
-          JS.global[:crypto][:subtle]
-            .decrypt(WebCrypto::Util.js_obj(name: "AES-GCM", iv: iv), self, ciphertext)
-            .await
+          data = WebCrypto::Util::JSArray.from_bytes(ciphertext)
+          iv_arr = WebCrypto::Util::JSArray.from_bytes(iv)
+          result = JS.global[:crypto][:subtle]
+                     .decrypt(WebCrypto::Util.js_obj(name: "AES-GCM", iv: iv_arr), self, data)
+                     .await
+          WebCrypto::Util::JSArray.to_bytes(result)
         end
       end
     end
