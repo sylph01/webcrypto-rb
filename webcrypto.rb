@@ -323,6 +323,47 @@ module WebCrypto
       end
     end
 
+    module RSAPSS
+      # RSA-PSS also binds its hash to the key (RsaHashedKeyGenParams), but the
+      # signature additionally takes a per-call saltLength (in bytes). When
+      # unspecified, default to the hash's digest length — the salt-equals-digest
+      # convention of JWS PS256/384/512 (RFC 7518). Override via salt_length:.
+      DIGEST_LENGTH = {
+        "SHA-256" => 32,
+        "SHA-384" => 48,
+        "SHA-512" => 64
+      }.freeze
+
+      def self.default_salt_length(js_key)
+        hash = js_key[:algorithm][:hash][:name].to_s
+        DIGEST_LENGTH[hash] || raise(ArgumentError, "unsupported RSA-PSS hash: #{hash.inspect}")
+      end
+
+      module Sign
+        def sign(data, salt_length: nil)
+          require_usage!("sign")
+          salt_length ||= RSAPSS.default_salt_length(@js)
+          bytes = WebCrypto::Util::JSArray.from_bytes(data)
+          result = JS.global[:crypto][:subtle]
+                     .sign(WebCrypto::Util.js_obj(name: "RSA-PSS", saltLength: salt_length), @js, bytes)
+                     .await
+          WebCrypto::Util::JSArray.to_bytes(result)
+        end
+      end
+
+      module Verify
+        def verify(signature, data, salt_length: nil)
+          require_usage!("verify")
+          salt_length ||= RSAPSS.default_salt_length(@js)
+          sig_bytes = WebCrypto::Util::JSArray.from_bytes(signature)
+          data_bytes = WebCrypto::Util::JSArray.from_bytes(data)
+          JS.global[:crypto][:subtle]
+            .verify(WebCrypto::Util.js_obj(name: "RSA-PSS", saltLength: salt_length), @js, sig_bytes, data_bytes)
+            .await == JS::True
+        end
+      end
+    end
+
     CAPABILITY_MAP = {
       "AES-GCM" => { "encrypt" => AESGCM::Encrypt, "decrypt" => AESGCM::Decrypt },
       "AES-CTR" => { "encrypt" => AESCTR::Encrypt, "decrypt" => AESCTR::Decrypt },
@@ -330,7 +371,8 @@ module WebCrypto
       "AES-KW"  => { "wrapKey" => AESKW::WrapKey,  "unwrapKey" => AESKW::UnwrapKey },
       "ECDSA"   => { "sign"    => ECDSA::Sign,     "verify"  => ECDSA::Verify   },
       "Ed25519" => { "sign"    => Ed25519::Sign,   "verify"  => Ed25519::Verify },
-      "RSASSA-PKCS1-v1_5" => { "sign" => RSASSA_PKCS1_v1_5::Sign, "verify" => RSASSA_PKCS1_v1_5::Verify }
+      "RSASSA-PKCS1-v1_5" => { "sign" => RSASSA_PKCS1_v1_5::Sign, "verify" => RSASSA_PKCS1_v1_5::Verify },
+      "RSA-PSS" => { "sign" => RSAPSS::Sign, "verify" => RSAPSS::Verify }
       # extend as needed
     }.freeze
   end
