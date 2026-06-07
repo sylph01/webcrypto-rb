@@ -23,6 +23,7 @@ module WebCrypto
     buf
   end
 
+  # Only available under Secure Context
   def self.randomUUID()
     JS.global[:crypto].randomUUID().to_s
   end
