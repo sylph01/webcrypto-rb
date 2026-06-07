@@ -38,8 +38,9 @@ pt  = key.decrypt(ct, iv: iv)
       const response = await fetch("https://cdn.jsdelivr.net/npm/@ruby/3.4-wasm-wasi@2.7.1/dist/ruby+stdlib.wasm");
       const module = await WebAssembly.compileStreaming(response);
       const { vm } = await DefaultRubyVM(module);
-      // js/promise enables JS::Object#await used throughout the library.
-      vm.eval(`require "js"; require "js/promise"`);
+      // require "js" alone provides JS::Object#await; it works because the code
+      // below runs under vm.evalAsync, which sets up the fiber.
+      vm.eval(`require "js"`);
       const lib = await (await fetch("../webcrypto.rb")).text();
       vm.eval(lib);
       window.vm = vm; // drive from DevTools: await vm.evalAsync(`...`)
