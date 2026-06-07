@@ -197,8 +197,29 @@ module WebCrypto
     end
 
     module ECDSA
+      # The hash is not part of an ECDSA key (its algorithm only carries the
+      # namedCurve); it is chosen per sign/verify call. When the caller does not
+      # specify one, derive the conventional pairing from the key's curve
+      # (RFC 7518 ES256/ES384/ES512), so a P-384 key signs with SHA-384 rather
+      # than a hardcoded SHA-256. Callers may still override via `hash:`.
+      #
+      # namedCurve is a required member of EcKeyGenParams, so any working key has
+      # one of these curves; an unrecognized curve means something unexpected and
+      # is raised rather than silently defaulted.
+      CURVE_HASH = {
+        "P-256" => "SHA-256",
+        "P-384" => "SHA-384",
+        "P-521" => "SHA-512"
+      }.freeze
+
+      def self.default_hash(key)
+        curve = key[:algorithm][:namedCurve].to_s
+        CURVE_HASH[curve] || raise(ArgumentError, "unsupported ECDSA curve: #{curve.inspect}")
+      end
+
       module Sign
-        def sign(data, hash: "SHA-256")
+        def sign(data, hash: nil)
+          hash ||= ECDSA.default_hash(self)
           JS.global[:crypto][:subtle]
             .sign(WebCrypto::Util.js_obj(name: "ECDSA", hash: hash), self, data)
             .await
@@ -206,7 +227,8 @@ module WebCrypto
       end
 
       module Verify
-        def verify(signature, data, hash: "SHA-256")
+        def verify(signature, data, hash: nil)
+          hash ||= ECDSA.default_hash(self)
           JS.global[:crypto][:subtle]
             .verify(WebCrypto::Util.js_obj(name: "ECDSA", hash: hash), self, signature, data)
             .await == JS::True
