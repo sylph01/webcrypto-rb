@@ -52,6 +52,16 @@ Tests.test("Encoding base64 is strict and unwrapped") do
   Tests.assert_equal("hello world".b, WebCrypto::Encoding.from_base64(b64))
 end
 
+# --- deep JS->Ruby converter (the JWK export type-probe) ----------------------
+Tests.test("Util.deep_to_ruby converts a nested JS object across all value types") do
+  js = JS.global[:JSON].parse('{"kty":"EC","ext":true,"key_ops":["sign","verify"],"meta":{"n":2}}')
+  ruby = WebCrypto::Util.deep_to_ruby(js)
+  Tests.assert_equal("EC", ruby["kty"])
+  Tests.assert_equal(true, ruby["ext"])
+  Tests.assert_equal(["sign", "verify"], ruby["key_ops"])
+  Tests.assert_equal(2, ruby["meta"]["n"])
+end
+
 # --- digest (known-answer, no randomness) -------------------------------------
 Tests.test("digest SHA-256 of 'abc' matches the known answer") do
   digest = WebCrypto.digest("abc".b, algorithm: "SHA-256")

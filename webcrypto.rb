@@ -17,6 +17,40 @@ module WebCrypto
       obj
     end
 
+    # Recursively convert a JS value (object/array/primitive) to a Ruby value.
+    # Needed for exportKey("jwk", ...), which returns a nested JS dictionary
+    # (string fields, a boolean `ext`, an array `key_ops`, and possibly nested
+    # objects). Distinct from the byte conversions in JSArray: this moves
+    # JSON-shaped text/structure, never bytes. Object keys come back as Strings.
+    #
+    # The type probe is JS-side because JS::Object is a BasicObject (no Ruby
+    # reflection): Array.isArray, then `typeof`. Primitives are coerced
+    # immediately (to_s / numeric / == JS::True) per the boundary rules. Null is
+    # not handled — standard JWK has no null fields.
+    def self.deep_to_ruby(value)
+      if JS.global[:Array].isArray(value) == JS::True
+        value[:length].to_i.times.map { |i| deep_to_ruby(value[i]) }
+      else
+        case value.typeof.to_s
+        when "string"
+          value.to_s
+        when "boolean"
+          value == JS::True
+        when "number"
+          f = value.to_f
+          f == f.to_i ? f.to_i : f
+        when "object"
+          keys = JS.global[:Object].keys(value)
+          keys[:length].to_i.times.each_with_object({}) do |i, h|
+            k = keys[i].to_s
+            h[k] = deep_to_ruby(value[k])
+          end
+        else # "undefined" (and any unexpected typeof) -> nil
+          nil
+        end
+      end
+    end
+
     module JSArray
       # Accept either a TypedArray or an ArrayBuffer
       def self.view(js_obj)
