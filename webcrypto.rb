@@ -58,8 +58,21 @@ module WebCrypto
     end
 
     module AESGCM
+      # NIST SP 800-38D recommended IV length. Exactly 12 bytes triggers GCM's
+      # fast path (counter seeded from IV || 0x00000001); other lengths run the
+      # IV through GHASH, which is slower and lowers the collision bound.
+      IV_LENGTH = 12
+
+      def self.validate_iv!(iv)
+        raise TypeError, "iv must be a byte String, got #{iv.class}" unless iv.is_a?(String)
+        return if iv.bytesize == IV_LENGTH
+
+        raise ArgumentError, "AES-GCM iv must be #{IV_LENGTH} bytes, got #{iv.bytesize}"
+      end
+
       module Encrypt
         def encrypt(plaintext, iv:)
+          AESGCM.validate_iv!(iv)
           data = WebCrypto::Util::JSArray.from_bytes(plaintext)
           iv_arr = WebCrypto::Util::JSArray.from_bytes(iv)
           result = JS.global[:crypto][:subtle]
@@ -71,6 +84,7 @@ module WebCrypto
 
       module Decrypt
         def decrypt(ciphertext, iv:)
+          AESGCM.validate_iv!(iv)
           data = WebCrypto::Util::JSArray.from_bytes(ciphertext)
           iv_arr = WebCrypto::Util::JSArray.from_bytes(iv)
           result = JS.global[:crypto][:subtle]
