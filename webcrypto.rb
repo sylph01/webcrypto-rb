@@ -220,17 +220,21 @@ module WebCrypto
       module Sign
         def sign(data, hash: nil)
           hash ||= ECDSA.default_hash(self)
-          JS.global[:crypto][:subtle]
-            .sign(WebCrypto::Util.js_obj(name: "ECDSA", hash: hash), self, data)
-            .await
+          bytes = WebCrypto::Util::JSArray.from_bytes(data)
+          result = JS.global[:crypto][:subtle]
+                     .sign(WebCrypto::Util.js_obj(name: "ECDSA", hash: hash), self, bytes)
+                     .await
+          WebCrypto::Util::JSArray.to_bytes(result)
         end
       end
 
       module Verify
         def verify(signature, data, hash: nil)
           hash ||= ECDSA.default_hash(self)
+          sig_bytes = WebCrypto::Util::JSArray.from_bytes(signature)
+          data_bytes = WebCrypto::Util::JSArray.from_bytes(data)
           JS.global[:crypto][:subtle]
-            .verify(WebCrypto::Util.js_obj(name: "ECDSA", hash: hash), self, signature, data)
+            .verify(WebCrypto::Util.js_obj(name: "ECDSA", hash: hash), self, sig_bytes, data_bytes)
             .await == JS::True
         end
       end
@@ -239,16 +243,20 @@ module WebCrypto
     module Ed25519
       module Sign
         def sign(data)
-          JS.global[:crypto][:subtle]
-            .sign(WebCrypto::Util.js_obj(name: "Ed25519"), self, data)
-            .await
+          bytes = WebCrypto::Util::JSArray.from_bytes(data)
+          result = JS.global[:crypto][:subtle]
+                     .sign(WebCrypto::Util.js_obj(name: "Ed25519"), self, bytes)
+                     .await
+          WebCrypto::Util::JSArray.to_bytes(result)
         end
       end
 
       module Verify
         def verify(signature, data)
+          sig_bytes = WebCrypto::Util::JSArray.from_bytes(signature)
+          data_bytes = WebCrypto::Util::JSArray.from_bytes(data)
           JS.global[:crypto][:subtle]
-            .verify(WebCrypto::Util.js_obj(name: "Ed25519"), self, signature, data)
+            .verify(WebCrypto::Util.js_obj(name: "Ed25519"), self, sig_bytes, data_bytes)
             .await == JS::True
         end
       end
