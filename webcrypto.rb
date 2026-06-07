@@ -95,6 +95,107 @@ module WebCrypto
       end
     end
 
+    module AESCTR
+      # The AES-CTR counter is a full AES block (16 bytes). `length` is how many
+      # of its trailing bits form the incrementing counter; the leading bits are
+      # the fixed nonce. 64 is the common split, giving 2^64 blocks per message.
+      COUNTER_LENGTH = 16
+      DEFAULT_LENGTH = 64
+
+      def self.validate_counter!(counter)
+        raise TypeError, "counter must be a byte String, got #{counter.class}" unless counter.is_a?(String)
+        return if counter.bytesize == COUNTER_LENGTH
+
+        raise ArgumentError, "AES-CTR counter must be #{COUNTER_LENGTH} bytes, got #{counter.bytesize}"
+      end
+
+      module Encrypt
+        def encrypt(plaintext, counter:, length: DEFAULT_LENGTH)
+          AESCTR.validate_counter!(counter)
+          data = WebCrypto::Util::JSArray.from_bytes(plaintext)
+          counter_arr = WebCrypto::Util::JSArray.from_bytes(counter)
+          result = JS.global[:crypto][:subtle]
+                     .encrypt(WebCrypto::Util.js_obj(name: "AES-CTR", counter: counter_arr, length: length), self, data)
+                     .await
+          WebCrypto::Util::JSArray.to_bytes(result)
+        end
+      end
+
+      module Decrypt
+        def decrypt(ciphertext, counter:, length: DEFAULT_LENGTH)
+          AESCTR.validate_counter!(counter)
+          data = WebCrypto::Util::JSArray.from_bytes(ciphertext)
+          counter_arr = WebCrypto::Util::JSArray.from_bytes(counter)
+          result = JS.global[:crypto][:subtle]
+                     .decrypt(WebCrypto::Util.js_obj(name: "AES-CTR", counter: counter_arr, length: length), self, data)
+                     .await
+          WebCrypto::Util::JSArray.to_bytes(result)
+        end
+      end
+    end
+
+    module AESCBC
+      # AES-CBC's IV is exactly one cipher block.
+      IV_LENGTH = 16
+
+      def self.validate_iv!(iv)
+        raise TypeError, "iv must be a byte String, got #{iv.class}" unless iv.is_a?(String)
+        return if iv.bytesize == IV_LENGTH
+
+        raise ArgumentError, "AES-CBC iv must be #{IV_LENGTH} bytes, got #{iv.bytesize}"
+      end
+
+      module Encrypt
+        def encrypt(plaintext, iv:)
+          AESCBC.validate_iv!(iv)
+          data = WebCrypto::Util::JSArray.from_bytes(plaintext)
+          iv_arr = WebCrypto::Util::JSArray.from_bytes(iv)
+          result = JS.global[:crypto][:subtle]
+                     .encrypt(WebCrypto::Util.js_obj(name: "AES-CBC", iv: iv_arr), self, data)
+                     .await
+          WebCrypto::Util::JSArray.to_bytes(result)
+        end
+      end
+
+      module Decrypt
+        def decrypt(ciphertext, iv:)
+          AESCBC.validate_iv!(iv)
+          data = WebCrypto::Util::JSArray.from_bytes(ciphertext)
+          iv_arr = WebCrypto::Util::JSArray.from_bytes(iv)
+          result = JS.global[:crypto][:subtle]
+                     .decrypt(WebCrypto::Util.js_obj(name: "AES-CBC", iv: iv_arr), self, data)
+                     .await
+          WebCrypto::Util::JSArray.to_bytes(result)
+        end
+      end
+    end
+
+    module AESKW
+      # AES-KW (RFC 3394 key wrap) does not use encrypt/decrypt: it wraps and
+      # unwraps CryptoKeys. There is no IV; the algorithm bag is just the name.
+      # wrap_key takes another Key and returns the wrapped bytes; unwrap_key
+      # takes wrapped bytes and returns a fresh, capability-wrapped Key.
+      module WrapKey
+        def wrap_key(key, format: "raw")
+          result = JS.global[:crypto][:subtle]
+                     .wrapKey(format, key, self, WebCrypto::Util.js_obj(name: "AES-KW"))
+                     .await
+          WebCrypto::Util::JSArray.to_bytes(result)
+        end
+      end
+
+      module UnwrapKey
+        def unwrap_key(wrapped_key, algorithm:, usages:, extractable: true, format: "raw")
+          data = WebCrypto::Util::JSArray.from_bytes(wrapped_key)
+          result = JS.global[:crypto][:subtle]
+                     .unwrapKey(format, data, self, WebCrypto::Util.js_obj(name: "AES-KW"),
+                                WebCrypto::Util.js_obj(algorithm), extractable, usages)
+                     .await
+          WebCrypto::CryptoKey.wrap(result)
+        end
+      end
+    end
+
     module ECDSA
       module Sign
         def sign(data, hash: "SHA-256")
@@ -133,6 +234,9 @@ module WebCrypto
 
     CAPABILITY_MAP = {
       "AES-GCM" => { "encrypt" => AESGCM::Encrypt, "decrypt" => AESGCM::Decrypt },
+      "AES-CTR" => { "encrypt" => AESCTR::Encrypt, "decrypt" => AESCTR::Decrypt },
+      "AES-CBC" => { "encrypt" => AESCBC::Encrypt, "decrypt" => AESCBC::Decrypt },
+      "AES-KW"  => { "wrapKey" => AESKW::WrapKey,  "unwrapKey" => AESKW::UnwrapKey },
       "ECDSA"   => { "sign"    => ECDSA::Sign,     "verify"  => ECDSA::Verify   },
       "Ed25519" => { "sign"    => Ed25519::Sign,   "verify"  => Ed25519::Verify }
       # extend as needed
