@@ -31,6 +31,8 @@ module WebCrypto
   end
 
   module CryptoKey
+    KeyPair = Struct.new(:public_key, :private_key)
+
     module Base
       def algorithm_name
         self[:algorithm][:name].to_s
@@ -79,9 +81,28 @@ module WebCrypto
       end
     end
 
+    module Ed25519
+      module Sign
+        def sign(data)
+          JS.global[:crypto][:subtle]
+            .sign(WebCrypto::Util.js_obj(name: "Ed25519"), self, data)
+            .await
+        end
+      end
+
+      module Verify
+        def verify(signature, data)
+          JS.global[:crypto][:subtle]
+            .verify(WebCrypto::Util.js_obj(name: "Ed25519"), self, signature, data)
+            .await == JS::True
+        end
+      end
+    end
+
     CAPABILITY_MAP = {
       "AES-GCM" => { "encrypt" => AESGCM::Encrypt, "decrypt" => AESGCM::Decrypt },
       "ECDSA"   => { "sign"    => ECDSA::Sign,     "verify"  => ECDSA::Verify   },
+      "Ed25519" => { "sign"    => Ed25519::Sign,   "verify"  => Ed25519::Verify }
       # extend as needed
     }.freeze
 
@@ -96,11 +117,15 @@ module WebCrypto
     end
 
     def self.generate_key(algorithm, is_extractable, key_usages)
-      self.wrap(
-        JS.global[:crypto][:subtle]
-          .generateKey(WebCrypto::Util.js_obj(algorithm), is_extractable, key_usages)
-          .await
-      )
+      result = JS.global[:crypto][:subtle]
+                 .generateKey(WebCrypto::Util.js_obj(algorithm), is_extractable, key_usages)
+                 .await
+
+      if result[:constructor][:name].to_s == "CryptoKey"
+        wrap(result)
+      else
+        KeyPair.new(wrap(result[:publicKey]), wrap(result[:privateKey]))
+      end
     end
   end
 
